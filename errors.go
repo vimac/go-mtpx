@@ -51,3 +51,11 @@ type FileObjectError struct {
 type SendObjectError struct {
 	error
 }
+
+type DeviceNotFoundError struct {
+	error
+}
+
+type DeviceListError struct {
+	error
+}

@@ -3,11 +3,13 @@ package mtpx
 import (
 	"errors"
 	"fmt"
-	"github.com/ganeshrvel/go-mtpfs/mtp"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/ganeshrvel/go-mtpfs/mtp"
+	"github.com/ganeshrvel/usb"
 )
 
 // todo: work on documentations
@@ -33,6 +35,145 @@ func Initialize(init Init) (*mtp.Device, error) {
 	}
 
 	return dev, nil
+}
+
+// ListDevices returns information about all connected MTP devices.
+// Each device is opened briefly to retrieve its information (manufacturer, product, serial),
+// then closed. The returned MtpDeviceInfo contains VendorId, ProductId, and SerialNumber
+// which can be used with InitializeByDeviceId to connect to a specific device.
+func ListDevices() ([]MtpDeviceInfo, error) {
+	c := usb.NewContext()
+	defer c.Exit()
+
+	devs, err := mtp.FindDevices(c)
+	if err != nil {
+		return nil, DeviceListError{error: err}
+	}
+
+	var result []MtpDeviceInfo
+
+	for _, d := range devs {
+		// Open the device to get its info
+		if err := d.Open(); err != nil {
+			d.Done()
+			continue
+		}
+
+		// Get USB info (requires device to be open)
+		usbInfo, err := d.GetUsbInfo()
+		if err != nil {
+			d.Close()
+			d.Done()
+			continue
+		}
+
+		info := MtpDeviceInfo{
+			VendorId:     usbInfo.IdVendor,
+			ProductId:    usbInfo.IdProduct,
+			Manufacturer: usbInfo.Manufacturer,
+			Model:        usbInfo.Product,
+			SerialNumber: usbInfo.SerialNumber,
+		}
+
+		result = append(result, info)
+
+		// Close and release the device
+		d.Close()
+		d.Done()
+	}
+
+	return result, nil
+}
+
+// InitializeByDeviceId opens a specific MTP device by vendor ID, product ID, and optional serial number.
+// This enables connecting to a specific device when multiple MTP devices are connected.
+//
+// Parameters:
+//   - vendorId: USB-IF vendor ID (e.g., 0x04e8 for Samsung)
+//   - productId: USB-IF product ID (e.g., 0x6860)
+//   - serialNumber: Optional device serial number. Pass empty string to match any device
+//     with the given vendorId and productId. When empty and multiple devices match,
+//     the first matching device will be selected.
+//   - init: Initialization options including debug mode
+//
+// Returns the opened device or an error if the device is not found or cannot be opened.
+func InitializeByDeviceId(vendorId uint16, productId uint16, serialNumber string, init Init) (*mtp.Device, error) {
+	c := usb.NewContext()
+
+	devs, err := mtp.FindDevices(c)
+	if err != nil {
+		return nil, MtpDetectFailedError{error: err}
+	}
+
+	if len(devs) == 0 {
+		return nil, MtpDetectFailedError{error: fmt.Errorf("no MTP devices found")}
+	}
+
+	for _, d := range devs {
+		// Open the device to get its info
+		if err := d.Open(); err != nil {
+			d.Done()
+			continue
+		}
+
+		// Get USB info
+		usbInfo, err := d.GetUsbInfo()
+		if err != nil {
+			d.Close()
+			d.Done()
+			continue
+		}
+
+		// Check if vendor and product IDs match
+		if usbInfo.IdVendor != vendorId || usbInfo.IdProduct != productId {
+			d.Close()
+			d.Done()
+			continue
+		}
+
+		// If serial number is specified, check if it matches
+		if serialNumber != "" && usbInfo.SerialNumber != serialNumber {
+			d.Close()
+			d.Done()
+			continue
+		}
+
+		// Found a matching device - close other candidates first
+		for _, other := range devs {
+			if other != d {
+				other.Done()
+			}
+		}
+
+		d.MTPDebug = init.DebugMode
+		d.DataDebug = init.DebugMode
+		d.USBDebug = init.DebugMode
+		d.Timeout = devTimeout
+
+		if err = d.Configure(); err != nil {
+			d.Close()
+			d.Done()
+			return nil, ConfigureError{error: err}
+		}
+
+		return d, nil
+	}
+
+	if serialNumber != "" {
+		return nil, DeviceNotFoundError{error: fmt.Errorf("device with vendorId=0x%04x, productId=0x%04x, serialNumber=%s not found", vendorId, productId, serialNumber)}
+	}
+	return nil, DeviceNotFoundError{error: fmt.Errorf("device with vendorId=0x%04x, productId=0x%04x not found", vendorId, productId)}
+}
+
+// GetDeviceIdentifiers returns the vendor ID, product ID, and serial number for an opened MTP device.
+// These identifiers can be used to reconnect to the same device via InitializeByDeviceId.
+func GetDeviceIdentifiers(dev *mtp.Device) (vendorId uint16, productId uint16, serialNumber string, err error) {
+	usbInfo, err := dev.GetUsbInfo()
+	if err != nil {
+		return 0, 0, "", DeviceInfoError{error: err}
+	}
+
+	return usbInfo.IdVendor, usbInfo.IdProduct, usbInfo.SerialNumber, nil
 }
 
 // Dispose - close the mtp device

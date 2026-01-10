@@ -1,15 +1,34 @@
 package mtpx
 
 import (
-	"github.com/ganeshrvel/go-mtpfs/mtp"
 	"os"
 	"time"
+
+	"github.com/ganeshrvel/go-mtpfs/mtp"
 )
 
 type allowedSecondExtMap map[string]string
 
 type Init struct {
 	DebugMode bool
+}
+
+// MtpDeviceInfo contains information about a connected MTP device
+type MtpDeviceInfo struct {
+	// USB-IF vendor ID
+	VendorId uint16 `json:"vendorId"`
+
+	// USB-IF product ID
+	ProductId uint16 `json:"productId"`
+
+	// Manufacturer name
+	Manufacturer string `json:"manufacturer,omitempty"`
+
+	// Product/Model name
+	Model string `json:"model,omitempty"`
+
+	// Device serial number
+	SerialNumber string `json:"serialNumber,omitempty"`
 }
 
 type StorageData struct {
