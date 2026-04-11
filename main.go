@@ -17,8 +17,28 @@ import (
 
 // initialize the mtp device
 // returns mtp device
-func Initialize(init Init) (*mtp.Device, error) {
-	dev, err := mtp.SelectDeviceWithDebugging("", init.DebugMode)
+func Initialize(init Init, c ...*usb.Context) (*mtp.Device, error) {
+	var ctx *usb.Context
+	if len(c) > 0 {
+		ctx = c[0]
+	}
+
+	if ctx == nil {
+		ctx = usb.NewContext()
+	}
+
+	devs, err := mtp.FindDevices(ctx)
+	if err != nil {
+		return nil, MtpDetectFailedError{error: err}
+	}
+	if len(devs) == 0 {
+		return nil, MtpDetectFailedError{error: fmt.Errorf("no MTP devices found")}
+	}
+	dev := devs[0]
+	// Close other devices
+	for i := 1; i < len(devs); i++ {
+		devs[i].Done()
+	}
 
 	if err != nil {
 		return nil, MtpDetectFailedError{error: err}
@@ -41,11 +61,18 @@ func Initialize(init Init) (*mtp.Device, error) {
 // Each device is opened briefly to retrieve its information (manufacturer, product, serial),
 // then closed. The returned MtpDeviceInfo contains VendorId, ProductId, and SerialNumber
 // which can be used with InitializeByDeviceId to connect to a specific device.
-func ListDevices() ([]MtpDeviceInfo, error) {
-	c := usb.NewContext()
-	defer c.Exit()
+func ListDevices(c ...*usb.Context) ([]MtpDeviceInfo, error) {
+	var ctx *usb.Context
+	if len(c) > 0 {
+		ctx = c[0]
+	}
+	
+	if ctx == nil {
+		ctx = usb.NewContext()
+		defer ctx.Exit()
+	}
 
-	devs, err := mtp.FindDevices(c)
+	devs, err := mtp.FindDevices(ctx)
 	if err != nil {
 		return nil, DeviceListError{error: err}
 	}
@@ -95,12 +122,20 @@ func ListDevices() ([]MtpDeviceInfo, error) {
 //     with the given vendorId and productId. When empty and multiple devices match,
 //     the first matching device will be selected.
 //   - init: Initialization options including debug mode
+//   - c: USB context
 //
 // Returns the opened device or an error if the device is not found or cannot be opened.
-func InitializeByDeviceId(vendorId uint16, productId uint16, serialNumber string, init Init) (*mtp.Device, error) {
-	c := usb.NewContext()
+func InitializeByDeviceId(vendorId, productId uint16, serialNumber string, init Init, c ...*usb.Context) (*mtp.Device, error) {
+	var ctx *usb.Context
+	if len(c) > 0 {
+		ctx = c[0]
+	}
 
-	devs, err := mtp.FindDevices(c)
+	if ctx == nil {
+		ctx = usb.NewContext()
+	}
+
+	devs, err := mtp.FindDevices(ctx)
 	if err != nil {
 		return nil, MtpDetectFailedError{error: err}
 	}
