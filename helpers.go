@@ -86,16 +86,25 @@ func GetObjectFromParentIdAndFilename(dev *mtp.Device, storageId uint32, parentI
 		return nil, FileObjectError{error: err}
 	}
 
+	// Some MTP devices reject GetObjectPropValue (InvalidObjectHandle or
+	// DevicePropNotSupported). Probe it once and fall back to GetObjectInfo
+	// based name matching when the device refuses it.
+	usePropValue := true
+
 	for _, objectId := range handles.Values {
-		// fetch the ObjectFileName
-		var val mtp.StringValue
-		if err := dev.GetObjectPropValue(objectId, mtp.OPC_ObjectFileName, &val); err != nil {
-			return nil, FileObjectError{error: err}
+		propName := ""
+
+		if usePropValue {
+			var val mtp.StringValue
+			if err := dev.GetObjectPropValue(objectId, mtp.OPC_ObjectFileName, &val); err != nil {
+				usePropValue = false
+			} else {
+				propName = val.Value
+			}
 		}
 
-		// if the ObjectFileName doesn't match the [filename] then skip the current iteration
-		// this will avoid fetching the whole object properties and improve the performance a bit.
-		if !strings.EqualFold(val.Value, filename) {
+		if usePropValue && !strings.EqualFold(propName, filename) {
+			// this will avoid fetching the whole object properties and improve the performance a bit.
 			continue
 		}
 
